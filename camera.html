@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Superponer Joya en Cuello</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <style>
+    video, canvas {
+      display: block;
+      margin: auto;
+    }
+    .joya-img {
+      width: 100px;
+      cursor: pointer;
+      margin: 10px;
+    }
+    .joyas-container {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Superponer Joya en Cuello</h1>
+  <video id="video" width="640" height="480" autoplay playsinline></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  
+  <div class="joyas-container">
+    <img src="imagen.png" class="joya-img" id="joya1" alt="Joya 1">
+    <img src="imagen3.png" class="joya-img" id="joya2" alt="Joya 2">
+  </div>
+
+  <script>
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let joyaImage = new Image();
+    let selectedJoya = '';
+
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user'
+          }
+        });
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            resolve(video);
+          };
+        });
+      } catch (error) {
+        console.error('Error accediendo a la cámara: ', error);
+      }
+    }
+
+    async function loadBlazePose() {
+      try {
+        const model = await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose, {
+          runtime: 'tfjs',
+          modelType: 'full'
+        });
+        return model;
+      } catch (error) {
+        console.error('Error cargando el modelo BlazePose: ', error);
+      }
+    }
+
+    function getJoyaPosition(pose) {
+      if (!pose || !pose.keypoints) {
+        return null;
+      }
+
+      const nose = pose.keypoints.find(point => point.name === 'nose');
+      const leftShoulder = pose.keypoints.find(point => point.part === 'left_shoulder');
+      const rightShoulder = pose.keypoints.find(point => point.part === 'right_shoulder');
+
+      if (nose && leftShoulder && rightShoulder) {
+        const x = nose.x;
+        const y = (leftShoulder.y + rightShoulder.y) / 2;
+        return { x, y, leftShoulder, rightShoulder };
+      }
+      return null;
+    }
+
+    async function startApp() {
+      await setupCamera();
+      const net = await loadBlazePose();
+
+      if (!net) {
+        console.error('No se pudo cargar el modelo BlazePose');
+        return;
+      }
+
+      video.play();
+
+      async function detectPose() {
+        try {
+          const poses = await net.estimatePoses(video, {
+            flipHorizontal: false,
+            decodingMethod: 'single-person'
+          });
+
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          if (poses.length > 0) {
+            const pose = poses[0];
+            const joyaPosition = getJoyaPosition(pose);
+
+            if (joyaPosition && selectedJoya) {
+              const { leftShoulder, rightShoulder } = joyaPosition;
+              const neckWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+              const scale = neckWidth / joyaImage.width;
+
+              ctx.save();
+              ctx.translate(joyaPosition.x, joyaPosition.y);
+              ctx.scale(scale, scale);
+              ctx.drawImage(joyaImage, -joyaImage.width / 2, 0);
+              ctx.restore();
+            }
+          }
+        } catch (error) {
+          console.error('Error al detectar la pose: ', error);
+        }
+
+        requestAnimationFrame(detectPose);
+      }
+
+      detectPose();
+    }
+
+    document.getElementById('joya1').addEventListener('click', () => {
+      selectedJoya = 'imagen.png';
+      joyaImage.src = selectedJoya;
+      console.log('Joya 1 seleccionada');
+    });
+
+    document.getElementById('joya2').addEventListener('click', () => {
+      selectedJoya = 'imagen3.png';
+      joyaImage.src = selectedJoya;
+      console.log('Joya 2 seleccionada');
+    });
+
+    joyaImage.onload = () => {
+      console.log('Imagen de joya cargada: ', selectedJoya);
+    };
+
+    joyaImage.onerror = (error) => {
+      console.error('Error cargando la imagen de joya: ', error);
+    };
+
+    startApp();
+  </script>
+</body>
+</html>
